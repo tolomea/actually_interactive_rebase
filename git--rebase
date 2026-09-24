@@ -154,7 +154,7 @@ def do_action(stdscr, base, entries, cursor, action):
     os.unlink(todo_path)
 
     if rebase_in_progress():
-        if not continue_or_abort(stdscr, base):
+        if not continue_or_abort(stdscr, base, action):
             return entries, cursor, False
     elif returncode != 0:
         show_error(stdscr, stderr)
@@ -166,7 +166,7 @@ def do_action(stdscr, base, entries, cursor, action):
     return new_entries, new_cursor, True
 
 
-def continue_or_abort(stdscr, base):
+def continue_or_abort(stdscr, base, action=None):
     offset = 0
     last_sha = None
     while rebase_in_progress():
@@ -180,10 +180,13 @@ def continue_or_abort(stdscr, base):
             onto = git_output(["log", "-1", "--format=%s", "HEAD"])
             header = f"conflict applying '{stopped}' on top of '{onto}'"
             diff = git_output(["show", sha]).splitlines()
-        else:
+        elif action == "edit":
             last_sha = None
             head_subject = git_output(["log", "-1", "--format=%s", "HEAD"])
             header = f"paused to edit '{head_subject}'"
+        else:
+            last_sha = None
+            header = "rebase paused, not a conflict — likely an empty commit, inspect with !"
 
         visible = draw_pause(stdscr, header, diff, offset)
         offset = max(0, min(offset, max(0, len(diff) - visible)))
