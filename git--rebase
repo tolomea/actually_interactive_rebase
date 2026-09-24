@@ -56,10 +56,11 @@ def stopped_sha():
     return open(os.path.join(rebase_dir(), "stopped-sha")).read().strip()
 
 
-def run_foreground(stdscr, args, env=None):
+def run_foreground(stdscr, args, env=None, capture=True):
     curses.def_prog_mode()
     curses.endwin()
-    result = subprocess.run(args, env=env, stderr=subprocess.PIPE, text=True)
+    stderr = subprocess.PIPE if capture else None
+    result = subprocess.run(args, env=env, stderr=stderr, text=True)
     curses.reset_prog_mode()
     stdscr.refresh()
     return result.returncode, result.stderr
@@ -130,14 +131,39 @@ def do_action(stdscr, base, commits, cursor, action):
 
 
 def continue_or_abort(stdscr, base):
+    offset = 0
+    last_sha = None
     while rebase_in_progress():
-        draw_pause(stdscr)
+        diff = []
+        if has_conflicts():
+            sha = stopped_sha()
+            if sha != last_sha:
+                offset = 0
+                last_sha = sha
+            stopped = git_output(["log", "-1", "--format=%s", sha])
+            onto = git_output(["log", "-1", "--format=%s", "HEAD"])
+            header = f"conflict applying '{stopped}' on top of '{onto}'"
+            diff = git_output(["show", sha]).splitlines()
+        else:
+            last_sha = None
+            head_subject = git_output(["log", "-1", "--format=%s", "HEAD"])
+            header = f"paused to edit '{head_subject}'"
+
+        visible = draw_pause(stdscr, header, diff, offset)
+        offset = max(0, min(offset, max(0, len(diff) - visible)))
+
         key = stdscr.getch()
         if key == 27:
             run_foreground(stdscr, ["git", "rebase", "--abort"])
             return False
         elif key == ord("c"):
             run_foreground(stdscr, ["git", "rebase", "--continue"])
+        elif key == curses.KEY_UP:
+            offset = max(0, offset - 1)
+        elif key == curses.KEY_DOWN:
+            offset = min(max(0, len(diff) - visible), offset + 1)
+        elif key == ord("!"):
+            run_foreground(stdscr, [os.environ.get("SHELL", "/bin/sh")], capture=False)
     return True
 
 
@@ -153,23 +179,18 @@ def show_error(stdscr, stderr):
     stdscr.getch()
 
 
-def draw_pause(stdscr):
+def draw_pause(stdscr, header, diff, offset):
     stdscr.clear()
     h, w = stdscr.getmaxyx()
-    if has_conflicts():
-        sha = stopped_sha()
-        stopped = git_output(["log", "-1", "--format=%s", sha])
-        onto = git_output(["log", "-1", "--format=%s", "HEAD"])
-        stdscr.addnstr(0, 0, f"conflict applying '{stopped}' on top of '{onto}'", w - 1)
-        diff = git_output(["show", sha]).splitlines()
-        for i, line in enumerate(diff[: h - 5]):
-            stdscr.addnstr(2 + i, 0, line, w - 1)
-    else:
-        head_subject = git_output(["log", "-1", "--format=%s", "HEAD"])
-        stdscr.addnstr(0, 0, f"paused to edit '{head_subject}'", w - 1)
-    stdscr.addnstr(h - 2, 0, "resolve in another terminal, then:", w - 1)
-    stdscr.addnstr(h - 1, 0, "  c = continue    Esc = abort", w - 1)
+    stdscr.addnstr(0, 0, header, w - 1, curses.A_BOLD)
+    visible = h - 5
+    for i, line in enumerate(diff[offset : offset + visible]):
+        stdscr.addnstr(2 + i, 0, line, w - 1)
+    footer = "  c = continue    Esc = abort    ! = shell    ↑/↓ scroll" if diff else "  c = continue    Esc = abort    ! = shell"
+    stdscr.addnstr(h - 2, 0, "resolve here or in another terminal, then:", w - 1, curses.A_DIM)
+    stdscr.addnstr(h - 1, 0, footer, w - 1, curses.A_DIM)
     stdscr.refresh()
+    return visible
 
 
 def commit_color(subject):
