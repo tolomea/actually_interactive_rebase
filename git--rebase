@@ -52,11 +52,8 @@ def has_conflicts():
     return bool(git_output(["diff", "--name-only", "--diff-filter=U"]))
 
 
-def stopped_subjects():
-    stopped_sha = open(os.path.join(rebase_dir(), "stopped-sha")).read().strip()
-    stopped = git_output(["log", "-1", "--format=%s", stopped_sha])
-    onto = git_output(["log", "-1", "--format=%s", "HEAD"])
-    return stopped, onto
+def stopped_sha():
+    return open(os.path.join(rebase_dir(), "stopped-sha")).read().strip()
 
 
 def run_foreground(stdscr, args, env=None):
@@ -158,14 +155,20 @@ def show_error(stdscr, stderr):
 
 def draw_pause(stdscr):
     stdscr.clear()
+    h, w = stdscr.getmaxyx()
     if has_conflicts():
-        stopped, onto = stopped_subjects()
-        stdscr.addstr(0, 0, f"conflict applying '{stopped}' on top of '{onto}'")
+        sha = stopped_sha()
+        stopped = git_output(["log", "-1", "--format=%s", sha])
+        onto = git_output(["log", "-1", "--format=%s", "HEAD"])
+        stdscr.addnstr(0, 0, f"conflict applying '{stopped}' on top of '{onto}'", w - 1)
+        diff = git_output(["show", sha]).splitlines()
+        for i, line in enumerate(diff[: h - 5]):
+            stdscr.addnstr(2 + i, 0, line, w - 1)
     else:
         head_subject = git_output(["log", "-1", "--format=%s", "HEAD"])
-        stdscr.addstr(0, 0, f"paused to edit '{head_subject}'")
-    stdscr.addstr(2, 0, "resolve in another terminal, then:")
-    stdscr.addstr(3, 0, "  c = continue    Esc = abort")
+        stdscr.addnstr(0, 0, f"paused to edit '{head_subject}'", w - 1)
+    stdscr.addnstr(h - 2, 0, "resolve in another terminal, then:", w - 1)
+    stdscr.addnstr(h - 1, 0, "  c = continue    Esc = abort", w - 1)
     stdscr.refresh()
 
 
