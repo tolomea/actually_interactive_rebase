@@ -91,6 +91,12 @@ def action_allowed(action, cursor, n):
     return True
 
 
+def push_history(history, hist_idx, sha, cursor):
+    history = history[: hist_idx + 1]
+    history.append((sha, cursor))
+    return history, len(history) - 1
+
+
 def do_action(stdscr, base, commits, cursor, action):
     todo = build_todo(commits, cursor, action)
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
@@ -189,10 +195,12 @@ def main(stdscr, base):
         key = stdscr.getch()
         if key == 27:
             return
-        elif key == curses.KEY_UP:
-            cursor = max(0, cursor - 1)
-        elif key == curses.KEY_DOWN:
-            cursor = min(len(commits) - 1, cursor + 1)
+        elif key == curses.KEY_UP and cursor > 0:
+            cursor -= 1
+            history, hist_idx = push_history(history, hist_idx, history[hist_idx][0], cursor)
+        elif key == curses.KEY_DOWN and cursor < len(commits) - 1:
+            cursor += 1
+            history, hist_idx = push_history(history, hist_idx, history[hist_idx][0], cursor)
         elif key == 26 and hist_idx > 0:  # Ctrl-Z
             sha, cur = history[hist_idx - 1]
             result = git_run(["reset", "--hard", sha])
@@ -212,9 +220,8 @@ def main(stdscr, base):
         elif key in ACTION_KEYS and action_allowed(ACTION_KEYS[key], cursor, len(commits)):
             commits, cursor, ok = do_action(stdscr, base, commits, cursor, ACTION_KEYS[key])
             if ok:
-                history = history[: hist_idx + 1]
-                history.append((git_output(["rev-parse", "HEAD"]), cursor))
-                hist_idx = len(history) - 1
+                sha = git_output(["rev-parse", "HEAD"])
+                history, hist_idx = push_history(history, hist_idx, sha, cursor)
 
 
 def run():
