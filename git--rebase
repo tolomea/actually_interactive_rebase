@@ -197,6 +197,8 @@ def continue_or_abort(stdscr, base, action=None):
             return False
         elif key == ord("c"):
             run_foreground(stdscr, ["git", "rebase", "--continue"])
+        elif key == ord("s"):
+            run_foreground(stdscr, ["git", "rebase", "--skip"])
         elif key == curses.KEY_UP:
             offset = max(0, offset - 1)
         elif key == curses.KEY_DOWN:
@@ -225,7 +227,7 @@ def draw_pause(stdscr, header, diff, offset):
     visible = h - 5
     for i, line in enumerate(diff[offset : offset + visible]):
         stdscr.addnstr(2 + i, 0, line, w - 1)
-    footer = "  c = continue    Esc = abort    ! = shell    ↑/↓ scroll" if diff else "  c = continue    Esc = abort    ! = shell"
+    footer = "  c = continue    s = skip    Esc = abort    ! = shell    ↑/↓ scroll" if diff else "  c = continue    s = skip    Esc = abort    ! = shell"
     stdscr.addnstr(h - 2, 0, "resolve here or in another terminal, then:", w - 1, curses.A_DIM)
     stdscr.addnstr(h - 1, 0, footer, w - 1, curses.A_DIM)
     stdscr.refresh()
