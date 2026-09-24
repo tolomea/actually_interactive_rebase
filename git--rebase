@@ -115,6 +115,7 @@ ACTION_LABELS = [
     ("delete", "d delete"),
     ("move_up", "q move up"),
     ("move_down", "a move down"),
+    ("edit", "! edit+shell"),
 ]
 
 ACTION_KEYS = {
@@ -146,7 +147,7 @@ def push_history(history, hist_idx, sha, cursor):
     return history, len(history) - 1
 
 
-def do_action(stdscr, base, entries, cursor, action):
+def do_action(stdscr, base, entries, cursor, action, auto_shell=False):
     todo = build_todo(entries, cursor, action)
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write("\n".join(todo) + "\n")
@@ -158,7 +159,7 @@ def do_action(stdscr, base, entries, cursor, action):
     os.unlink(todo_path)
 
     if rebase_in_progress():
-        if not continue_or_abort(stdscr, base, action):
+        if not continue_or_abort(stdscr, base, action, auto_shell):
             return entries, cursor, False
     elif returncode != 0:
         show_error(stdscr, stderr)
@@ -170,9 +171,14 @@ def do_action(stdscr, base, entries, cursor, action):
     return new_entries, new_cursor, True
 
 
-def continue_or_abort(stdscr, base, action=None):
+def continue_or_abort(stdscr, base, action=None, auto_shell=False):
     offset = 0
     last_sha = None
+
+    if auto_shell and rebase_in_progress() and not has_conflicts():
+        run_foreground(stdscr, [os.environ.get("SHELL", "/bin/sh")], capture=False)
+        run_foreground(stdscr, ["git", "rebase", "--continue"])
+
     while rebase_in_progress():
         diff = []
         if has_conflicts():
@@ -334,6 +340,11 @@ def main(stdscr, base):
             else:
                 hist_idx += 1
                 entries, cursor = get_entries(base), cur
+        elif key == ord("!") and action_allowed("edit", entries, cursor):
+            entries, cursor, ok = do_action(stdscr, base, entries, cursor, "edit", auto_shell=True)
+            if ok:
+                sha = git_output(["rev-parse", "HEAD"])
+                history, hist_idx = push_history(history, hist_idx, sha, cursor)
         elif key in ACTION_KEYS and action_allowed(ACTION_KEYS[key], entries, cursor):
             entries, cursor, ok = do_action(stdscr, base, entries, cursor, ACTION_KEYS[key])
             if ok:
