@@ -26,6 +26,10 @@ def git_run(args):
     return subprocess.run(["git", *args], capture_output=True, text=True)
 
 
+def is_ancestor(base):
+    return git_run(["merge-base", "--is-ancestor", base, "HEAD"]).returncode == 0
+
+
 def branches_at_shas():
     current = git_output(["rev-parse", "--abbrev-ref", "HEAD"])
     by_sha = {}
@@ -292,9 +296,6 @@ def main(stdscr, base):
         for i, color in enumerate(PALETTE, start=1):
             curses.init_pair(i, color, curses.COLOR_BLACK)
 
-    if rebase_in_progress():
-        continue_or_abort(stdscr, base)
-
     entries = get_entries(base)
     cursor = len(entries) - 1 if entries else 0
     salt = find_salt(entries)
@@ -343,8 +344,12 @@ def main(stdscr, base):
 def run():
     if len(sys.argv) != 2:
         sys.exit("usage: git--rebase <commit>")
+    if rebase_in_progress():
+        sys.exit("a rebase is already in progress — resolve it with plain git first")
     if dirty_worktree():
         sys.exit("working tree has uncommitted changes — commit or stash them first")
+    if not is_ancestor(sys.argv[1]):
+        sys.exit(f"{sys.argv[1]} is not an ancestor of HEAD")
     os.environ.setdefault("ESCDELAY", "25")
     curses.wrapper(main, sys.argv[1])
 
