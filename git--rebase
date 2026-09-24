@@ -229,19 +229,36 @@ def draw_pause(stdscr, header, diff, offset):
     return visible
 
 
-def commit_color(subject):
+def commit_color(subject, salt):
     if not curses.has_colors():
         return 0
-    digest = hashlib.md5(subject.encode()).digest()[0]
+    digest = hashlib.md5(f"{salt}{subject}".encode()).digest()[0]
     return digest % len(PALETTE) + 1
 
 
-def commit_attr(subject, is_cursor):
-    attr = curses.color_pair(commit_color(subject))
+def find_salt(entries):
+    if not curses.has_colors():
+        return 0
+    subjects = [e["subject"] for e in entries if e["type"] == "commit"]
+    if not subjects:
+        return 0
+    limit = (len(subjects) - 1) // len(PALETTE) + 1
+    for salt in range(500):
+        counts = {}
+        for subject in subjects:
+            color = commit_color(subject, salt)
+            counts[color] = counts.get(color, 0) + 1
+        if max(counts.values()) <= limit:
+            return salt
+    return salt
+
+
+def commit_attr(subject, is_cursor, salt):
+    attr = curses.color_pair(commit_color(subject, salt))
     return (attr | curses.A_REVERSE) if is_cursor else attr
 
 
-def draw(stdscr, entries, cursor):
+def draw(stdscr, entries, cursor, salt):
     stdscr.clear()
     h, w = stdscr.getmaxyx()
     for i, e in enumerate(entries):
@@ -252,7 +269,7 @@ def draw(stdscr, entries, cursor):
         else:
             refs = f" ({e['refs']})" if e["refs"] else ""
             line = f"{marker} {e['sha'][:7]} {e['subject']}{refs}"
-            attr = commit_attr(e["subject"], i == cursor)
+            attr = commit_attr(e["subject"], i == cursor, salt)
         stdscr.addnstr(i, 0, line, w - 1, attr)
     available = [label for action, label in ACTION_LABELS if entries and action_allowed(action, entries, cursor)]
     legend = "  ".join(available + ["^Z undo", "^Y redo", "Esc quit"])
@@ -275,11 +292,12 @@ def main(stdscr, base):
 
     entries = get_entries(base)
     cursor = len(entries) - 1 if entries else 0
+    salt = find_salt(entries)
     history = [(git_output(["rev-parse", "HEAD"]), cursor)]
     hist_idx = 0
 
     while True:
-        draw(stdscr, entries, cursor)
+        draw(stdscr, entries, cursor, salt)
         if not entries:
             if stdscr.getch() == 27:
                 return
