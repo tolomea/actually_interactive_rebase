@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
 import curses
+import hashlib
 import os
 import shlex
 import subprocess
 import sys
 import tempfile
+
+PALETTE = [
+    curses.COLOR_RED,
+    curses.COLOR_GREEN,
+    curses.COLOR_YELLOW,
+    curses.COLOR_CYAN,
+    curses.COLOR_MAGENTA,
+    curses.COLOR_WHITE,
+    curses.COLOR_BLUE,
+]
 
 
 def git_output(args):
@@ -158,6 +169,18 @@ def draw_pause(stdscr):
     stdscr.refresh()
 
 
+def commit_color(subject):
+    if not curses.has_colors():
+        return 0
+    digest = hashlib.md5(subject.encode()).digest()[0]
+    return digest % len(PALETTE) + 1
+
+
+def commit_attr(subject, is_cursor):
+    attr = curses.color_pair(commit_color(subject))
+    return (attr | curses.A_REVERSE) if is_cursor else attr
+
+
 def draw(stdscr, commits, cursor):
     stdscr.clear()
     h, w = stdscr.getmaxyx()
@@ -165,8 +188,7 @@ def draw(stdscr, commits, cursor):
         marker = ">" if i == cursor else " "
         refs = f" ({c['refs']})" if c["refs"] else ""
         line = f"{marker} {c['sha'][:7]} {c['subject']}{refs}"
-        attr = curses.A_REVERSE if i == cursor else curses.A_NORMAL
-        stdscr.addnstr(i, 0, line, w - 1, attr)
+        stdscr.addnstr(i, 0, line, w - 1, commit_attr(c["subject"], i == cursor))
     legend = "r reword  e edit  s squash  f fixup  d delete  q/a move  ^Z undo  ^Y redo  Esc quit"
     stdscr.addnstr(h - 1, 0, legend, w - 1, curses.A_DIM)
     stdscr.refresh()
@@ -176,6 +198,11 @@ def main(stdscr, base):
     curses.curs_set(0)
     curses.raw()
     stdscr.keypad(True)
+
+    if curses.has_colors():
+        curses.start_color()
+        for i, color in enumerate(PALETTE, start=1):
+            curses.init_pair(i, color, curses.COLOR_BLACK)
 
     if rebase_in_progress():
         continue_or_abort(stdscr, base)
