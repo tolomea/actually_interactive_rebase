@@ -222,6 +222,7 @@ def run():
         sys.exit("usage: git--rebase <commit>")
     if dirty_worktree():
         sys.exit("working tree has uncommitted changes — commit or stash them first")
+    os.environ.setdefault("ESCDELAY", "25")
     curses.wrapper(main, sys.argv[1])
 
 
