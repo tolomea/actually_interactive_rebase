@@ -26,13 +26,28 @@ def git_run(args):
     return subprocess.run(["git", *args], capture_output=True, text=True)
 
 
-def get_commits(base):
+def branches_at_shas():
+    current = git_output(["rev-parse", "--abbrev-ref", "HEAD"])
+    by_sha = {}
+    for line in git_output(["for-each-ref", "refs/heads", "--format=%(objectname) %(refname:short)"]).splitlines():
+        sha, branch = line.split(" ", 1)
+        if branch != current:
+            by_sha.setdefault(sha, []).append(branch)
+    return by_sha
+
+
+def get_entries(base):
     out = git_output(["log", "--reverse", "--format=%H\x1f%s\x1f%D", f"{base}..HEAD"])
-    commits = []
+    by_sha = branches_at_shas()
+    entries = []
     for line in out.splitlines():
         sha, subject, refs = line.split("\x1f")
-        commits.append({"sha": sha, "subject": subject, "refs": refs})
-    return commits
+        hidden = by_sha.get(sha, [])
+        refs = ", ".join(t for t in refs.split(", ") if t and t not in hidden)
+        entries.append({"type": "commit", "sha": sha, "subject": subject, "refs": refs})
+        for branch in hidden:
+            entries.append({"type": "update-ref", "branch": branch})
+    return entries
 
 
 def rebase_dir():
@@ -66,8 +81,8 @@ def run_foreground(stdscr, args, env=None, capture=True):
     return result.returncode, result.stderr
 
 
-def build_todo(commits, cursor, action):
-    todo = [[c["sha"], "pick", c["subject"]] for c in commits]
+def build_todo(entries, cursor, action):
+    todo = [dict(e, cmd="pick") for e in entries]
     if action == "move_up":
         todo[cursor - 1], todo[cursor] = todo[cursor], todo[cursor - 1]
     elif action == "move_down":
@@ -75,11 +90,28 @@ def build_todo(commits, cursor, action):
     elif action == "delete":
         del todo[cursor]
     else:
-        todo[cursor][1] = action
-    return [f"{cmd} {sha} {subject}" for sha, cmd, subject in todo]
+        todo[cursor]["cmd"] = action
+
+    lines = []
+    for e in todo:
+        if e["type"] == "update-ref":
+            lines.append(f"update-ref refs/heads/{e['branch']}")
+        else:
+            lines.append(f"{e['cmd']} {e['sha']} {e['subject']}")
+    return lines
 
 
 NEW_CURSOR = {"move_up": -1, "move_down": 1, "squash": -1, "fixup": -1}
+
+ACTION_LABELS = [
+    ("reword", "r reword"),
+    ("edit", "e edit"),
+    ("squash", "s squash"),
+    ("fixup", "f fixup"),
+    ("delete", "d delete"),
+    ("move_up", "q move up"),
+    ("move_down", "a move down"),
+]
 
 ACTION_KEYS = {
     ord("q"): "move_up",
@@ -92,11 +124,15 @@ ACTION_KEYS = {
 }
 
 
-def action_allowed(action, cursor, n):
-    if action in ("move_up", "squash", "fixup"):
-        return cursor > 0
-    if action == "move_down":
-        return cursor < n - 1
+def action_allowed(action, entries, cursor):
+    if action in ("reword", "edit", "squash", "fixup") and entries[cursor]["type"] != "commit":
+        return False
+    if action in ("move_up", "squash", "fixup") and cursor == 0:
+        return False
+    if action in ("squash", "fixup") and entries[cursor - 1]["type"] != "commit":
+        return False
+    if action == "move_down" and cursor == len(entries) - 1:
+        return False
     return True
 
 
@@ -106,8 +142,8 @@ def push_history(history, hist_idx, sha, cursor):
     return history, len(history) - 1
 
 
-def do_action(stdscr, base, commits, cursor, action):
-    todo = build_todo(commits, cursor, action)
+def do_action(stdscr, base, entries, cursor, action):
+    todo = build_todo(entries, cursor, action)
     with tempfile.NamedTemporaryFile("w", delete=False) as f:
         f.write("\n".join(todo) + "\n")
         todo_path = f.name
@@ -119,15 +155,15 @@ def do_action(stdscr, base, commits, cursor, action):
 
     if rebase_in_progress():
         if not continue_or_abort(stdscr, base):
-            return commits, cursor, False
+            return entries, cursor, False
     elif returncode != 0:
         show_error(stdscr, stderr)
-        return commits, cursor, False
+        return entries, cursor, False
 
-    new_commits = get_commits(base)
+    new_entries = get_entries(base)
     new_cursor = cursor + NEW_CURSOR.get(action, 0)
-    new_cursor = max(0, min(new_cursor, len(new_commits) - 1))
-    return new_commits, new_cursor, True
+    new_cursor = max(0, min(new_cursor, len(new_entries) - 1))
+    return new_entries, new_cursor, True
 
 
 def continue_or_abort(stdscr, base):
@@ -205,15 +241,21 @@ def commit_attr(subject, is_cursor):
     return (attr | curses.A_REVERSE) if is_cursor else attr
 
 
-def draw(stdscr, commits, cursor):
+def draw(stdscr, entries, cursor):
     stdscr.clear()
     h, w = stdscr.getmaxyx()
-    for i, c in enumerate(commits):
+    for i, e in enumerate(entries):
         marker = ">" if i == cursor else " "
-        refs = f" ({c['refs']})" if c["refs"] else ""
-        line = f"{marker} {c['sha'][:7]} {c['subject']}{refs}"
-        stdscr.addnstr(i, 0, line, w - 1, commit_attr(c["subject"], i == cursor))
-    legend = "r reword  e edit  s squash  f fixup  d delete  q/a move  ^Z undo  ^Y redo  Esc quit"
+        if e["type"] == "update-ref":
+            line = f"{marker} update-ref {e['branch']}"
+            attr = curses.A_REVERSE if i == cursor else curses.A_DIM
+        else:
+            refs = f" ({e['refs']})" if e["refs"] else ""
+            line = f"{marker} {e['sha'][:7]} {e['subject']}{refs}"
+            attr = commit_attr(e["subject"], i == cursor)
+        stdscr.addnstr(i, 0, line, w - 1, attr)
+    available = [label for action, label in ACTION_LABELS if entries and action_allowed(action, entries, cursor)]
+    legend = "  ".join(available + ["^Z undo", "^Y redo", "Esc quit"])
     stdscr.addnstr(h - 1, 0, legend, w - 1, curses.A_DIM)
     stdscr.refresh()
 
@@ -231,14 +273,14 @@ def main(stdscr, base):
     if rebase_in_progress():
         continue_or_abort(stdscr, base)
 
-    commits = get_commits(base)
-    cursor = len(commits) - 1 if commits else 0
+    entries = get_entries(base)
+    cursor = len(entries) - 1 if entries else 0
     history = [(git_output(["rev-parse", "HEAD"]), cursor)]
     hist_idx = 0
 
     while True:
-        draw(stdscr, commits, cursor)
-        if not commits:
+        draw(stdscr, entries, cursor)
+        if not entries:
             if stdscr.getch() == 27:
                 return
             continue
@@ -249,7 +291,7 @@ def main(stdscr, base):
         elif key == curses.KEY_UP and cursor > 0:
             cursor -= 1
             history, hist_idx = push_history(history, hist_idx, history[hist_idx][0], cursor)
-        elif key == curses.KEY_DOWN and cursor < len(commits) - 1:
+        elif key == curses.KEY_DOWN and cursor < len(entries) - 1:
             cursor += 1
             history, hist_idx = push_history(history, hist_idx, history[hist_idx][0], cursor)
         elif key == 26 and hist_idx > 0:  # Ctrl-Z
@@ -259,7 +301,7 @@ def main(stdscr, base):
                 show_error(stdscr, result.stderr)
             else:
                 hist_idx -= 1
-                commits, cursor = get_commits(base), cur
+                entries, cursor = get_entries(base), cur
         elif key == 25 and hist_idx < len(history) - 1:  # Ctrl-Y
             sha, cur = history[hist_idx + 1]
             result = git_run(["reset", "--hard", sha])
@@ -267,9 +309,9 @@ def main(stdscr, base):
                 show_error(stdscr, result.stderr)
             else:
                 hist_idx += 1
-                commits, cursor = get_commits(base), cur
-        elif key in ACTION_KEYS and action_allowed(ACTION_KEYS[key], cursor, len(commits)):
-            commits, cursor, ok = do_action(stdscr, base, commits, cursor, ACTION_KEYS[key])
+                entries, cursor = get_entries(base), cur
+        elif key in ACTION_KEYS and action_allowed(ACTION_KEYS[key], entries, cursor):
+            entries, cursor, ok = do_action(stdscr, base, entries, cursor, ACTION_KEYS[key])
             if ok:
                 sha = git_output(["rev-parse", "HEAD"])
                 history, hist_idx = push_history(history, hist_idx, sha, cursor)
