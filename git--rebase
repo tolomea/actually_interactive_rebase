@@ -166,8 +166,11 @@ def do_action(stdscr, base, entries, cursor, action, auto_shell=False):
         return entries, cursor, False
 
     new_entries = get_entries(base)
-    new_cursor = cursor + NEW_CURSOR.get(action, 0)
-    new_cursor = max(0, min(new_cursor, len(new_entries) - 1))
+    if action == "edit":
+        offset = len(new_entries) - len(entries)
+    else:
+        offset = NEW_CURSOR.get(action, 0)
+    new_cursor = max(0, min(cursor + offset, len(new_entries) - 1))
     return new_entries, new_cursor, True
 
 
