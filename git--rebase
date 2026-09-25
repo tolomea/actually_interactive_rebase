@@ -6,6 +6,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 PALETTE = [
     curses.COLOR_RED,
@@ -19,7 +20,9 @@ PALETTE = [
 
 
 def git_output(args):
-    return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(
+        ["git", *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
 
 
 def git_run(args):
@@ -33,7 +36,11 @@ def is_ancestor(base):
 def branches_at_shas():
     current = git_output(["rev-parse", "--abbrev-ref", "HEAD"])
     by_sha = {}
-    for line in git_output(["for-each-ref", "refs/heads", "--format=%(objectname) %(refname:short)"]).splitlines():
+    for line in git_output([
+        "for-each-ref",
+        "refs/heads",
+        "--format=%(objectname) %(refname:short)",
+    ]).splitlines():
         sha, branch = line.split(" ", 1)
         if branch != current:
             by_sha.setdefault(sha, []).append(branch)
@@ -55,11 +62,11 @@ def get_entries(base):
 
 
 def rebase_dir():
-    return git_output(["rev-parse", "--git-path", "rebase-merge"])
+    return Path(git_output(["rev-parse", "--git-path", "rebase-merge"]))
 
 
 def rebase_in_progress():
-    return os.path.isdir(rebase_dir())
+    return rebase_dir().is_dir()
 
 
 def dirty_worktree():
@@ -72,7 +79,7 @@ def has_conflicts():
 
 
 def stopped_sha():
-    return open(os.path.join(rebase_dir(), "stopped-sha")).read().strip()
+    return (rebase_dir() / "stopped-sha").read_text().strip()
 
 
 def run_foreground(stdscr, args, env=None, capture=True):
@@ -130,7 +137,10 @@ ACTION_KEYS = {
 
 
 def action_allowed(action, entries, cursor):
-    if action in ("reword", "edit", "squash", "fixup") and entries[cursor]["type"] != "commit":
+    if (
+        action in ("reword", "edit", "squash", "fixup")
+        and entries[cursor]["type"] != "commit"
+    ):
         return False
     if action in ("move_up", "squash", "fixup") and cursor == 0:
         return False
@@ -156,7 +166,7 @@ def do_action(stdscr, base, entries, cursor, action, auto_shell=False):
     env = os.environ.copy()
     env["GIT_SEQUENCE_EDITOR"] = "cp " + shlex.quote(todo_path)
     returncode, stderr = run_foreground(stdscr, ["git", "rebase", "-i", base], env=env)
-    os.unlink(todo_path)
+    Path(todo_path).unlink()
 
     if rebase_in_progress():
         if not continue_or_abort(stdscr, base, action, auto_shell):
@@ -199,7 +209,9 @@ def continue_or_abort(stdscr, base, action=None, auto_shell=False):
             header = f"paused to edit '{head_subject}'"
         else:
             last_sha = None
-            header = "rebase paused, not a conflict — likely an empty commit, inspect with !"
+            header = (
+                "rebase paused, not a conflict — likely an empty commit, inspect with !"
+            )
 
         visible = draw_pause(stdscr, header, diff, offset)
         offset = max(0, min(offset, max(0, len(diff) - visible)))
@@ -240,8 +252,14 @@ def draw_pause(stdscr, header, diff, offset):
     visible = h - 5
     for i, line in enumerate(diff[offset : offset + visible]):
         stdscr.addnstr(2 + i, 0, line, w - 1)
-    footer = "  c = continue    s = skip    Esc = abort    ! = shell    ↑/↓ scroll" if diff else "  c = continue    s = skip    Esc = abort    ! = shell"
-    stdscr.addnstr(h - 2, 0, "resolve here or in another terminal, then:", w - 1, curses.A_DIM)
+    footer = (
+        "  c = continue    s = skip    Esc = abort    ! = shell    ↑/↓ scroll"
+        if diff
+        else "  c = continue    s = skip    Esc = abort    ! = shell"
+    )
+    stdscr.addnstr(
+        h - 2, 0, "resolve here or in another terminal, then:", w - 1, curses.A_DIM
+    )
     stdscr.addnstr(h - 1, 0, footer, w - 1, curses.A_DIM)
     stdscr.refresh()
     return visible
@@ -289,8 +307,12 @@ def draw(stdscr, entries, cursor, salt):
             line = f"{marker} {e['sha'][:7]} {e['subject']}{refs}"
             attr = commit_attr(e["subject"], i == cursor, salt)
         stdscr.addnstr(i, 0, line, w - 1, attr)
-    available = [label for action, label in ACTION_LABELS if entries and action_allowed(action, entries, cursor)]
-    legend = "  ".join(available + ["^Z undo", "^Y redo", "Esc quit"])
+    available = [
+        label
+        for action, label in ACTION_LABELS
+        if entries and action_allowed(action, entries, cursor)
+    ]
+    legend = "  ".join([*available, "^Z undo", "^Y redo", "Esc quit"])
     stdscr.addnstr(h - 1, 0, legend, w - 1, curses.A_DIM)
     stdscr.refresh()
 
@@ -323,10 +345,14 @@ def main(stdscr, base):
             return
         elif key == curses.KEY_UP and cursor > 0:
             cursor -= 1
-            history, hist_idx = push_history(history, hist_idx, history[hist_idx][0], cursor)
+            history, hist_idx = push_history(
+                history, hist_idx, history[hist_idx][0], cursor
+            )
         elif key == curses.KEY_DOWN and cursor < len(entries) - 1:
             cursor += 1
-            history, hist_idx = push_history(history, hist_idx, history[hist_idx][0], cursor)
+            history, hist_idx = push_history(
+                history, hist_idx, history[hist_idx][0], cursor
+            )
         elif key == 26 and hist_idx > 0:  # Ctrl-Z
             sha, cur = history[hist_idx - 1]
             result = git_run(["reset", "--hard", sha])
@@ -344,12 +370,16 @@ def main(stdscr, base):
                 hist_idx += 1
                 entries, cursor = get_entries(base), cur
         elif key == ord("!") and action_allowed("edit", entries, cursor):
-            entries, cursor, ok = do_action(stdscr, base, entries, cursor, "edit", auto_shell=True)
+            entries, cursor, ok = do_action(
+                stdscr, base, entries, cursor, "edit", auto_shell=True
+            )
             if ok:
                 sha = git_output(["rev-parse", "HEAD"])
                 history, hist_idx = push_history(history, hist_idx, sha, cursor)
         elif key in ACTION_KEYS and action_allowed(ACTION_KEYS[key], entries, cursor):
-            entries, cursor, ok = do_action(stdscr, base, entries, cursor, ACTION_KEYS[key])
+            entries, cursor, ok = do_action(
+                stdscr, base, entries, cursor, ACTION_KEYS[key]
+            )
             if ok:
                 sha = git_output(["rev-parse", "HEAD"])
                 history, hist_idx = push_history(history, hist_idx, sha, cursor)

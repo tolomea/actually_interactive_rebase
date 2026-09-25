@@ -1,0 +1,83 @@
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+extend-select = [
+    "TID", # flake8-tidy-imports
+    "C4", # flake8-comprehensions
+    "B", # flake8-bugbear
+    "T20", # flake8-print
+    "T10", # flake8-debugger
+    "SIM", # flake8-simplify
+    "RET", # flake8-return
+    "INP", # flake8-no-pep420
+    "COM", # flake8-commas
+    "G", # flake8-logging-format
+    "PIE", # flake8-pie
+    "DJ", # flake8-django
+    "SLOT", # flake8-slots
+    "I", # isort
+    "UP", # pyupgrade
+    "RUF", # ruf
+    "F", # pyflakes
+    "PTH", # flake8-use-pathlib
+    "W", # pycodestyle
+    "E", # pycodestyle
+]
+
+ignore = [
+    "B018", # Found useless expression. Either assign it to a variable or remove it.
+    "B024", # {name} is an abstract base class, but it has no abstract methods or properties
+    "COM812", # Trailing comma missing
+    "E501", # Line too long ({width} > {limit})
+    "E741", # Do not use variables named 'I', 'O', or 'l'
+    "RET504", # Unnecessary assignment to {name} before return statement
+    "RET505", # Unnecessary {branch} after return statement
+    "RET506", # Unnecessary {branch} after raise statement
+    "RET507", # Unnecessary {branch} after continue statement
+    "RET508", # Unnecessary {branch} after break statement
+    "RUF001", # String contains ambiguous {}. Did you mean {}?
+    "RUF002", # Docstring contains ambiguous {}. Did you mean {}?
+    "RUF012", # Mutable class attributes should be annotated with typing.ClassVar
+    "RUF067", # `__init__` module should only contain docstrings and re-exports
+    "SIM102", # Use a single if statement instead of nested if statements
+    "SIM103", # Return the condition {condition} directly
+    "SIM108", # Use ternary operator {contents} instead of if-else-block
+    "SIM114", # Combine if branches using logical or operator
+    "SIM300", # Yoda condition detected
+
+    # TODO MAYBE ENABLE THESE
+
+    "B007", # Loop control variable {name} not used within loop body
+    "B011", # Do not assert False (python -O removes these calls), raise AssertionError()
+    "B904", # Within an except* clause, raise exceptions with raise ... from err or raise ... from None to distinguish them from errors in exception handling
+    "B905", # zip() without an explicit strict= parameter
+    "G004", # Logging statement uses f-string
+    "PTH123", # open() should be replaced by Path.open()
+    "RUF039", # First argument to {call} is not raw string
+    "RUF059", # Unpacked variable {name} is never used
+    "SIM105", # Use contextlib.suppress({exception}) instead of try-except-pass
+    "SIM117", # Use a single with statement with multiple contexts instead of nested with statements
+    "UP007", # Use X | Y for type annotations
+]
+
+[tool.ruff.lint.flake8-tidy-imports]
+# Disallow all relative imports.
+ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+force-single-line = true
+required-imports = []
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+skip-magic-trailing-comma = true
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+preview = true
