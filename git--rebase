@@ -87,6 +87,10 @@ def get_entries(base):
     return entries
 
 
+def has_merges(base):
+    return bool(git_output(["rev-list", "--merges", f"{base}..HEAD"]))
+
+
 def rebase_dir():
     return Path(git_output(["rev-parse", "--git-path", "rebase-merge"]))
 
@@ -415,6 +419,8 @@ def run():
         sys.exit("working tree has uncommitted changes — commit or stash them first")
     if not is_ancestor(sys.argv[1]):
         sys.exit(f"{sys.argv[1]} is not an ancestor of HEAD")
+    if has_merges(sys.argv[1]):
+        sys.exit(f"{sys.argv[1]}..HEAD contains merge commits — not supported")
     os.environ.setdefault("ESCDELAY", "25")
     curses.wrapper(main, sys.argv[1])
 
