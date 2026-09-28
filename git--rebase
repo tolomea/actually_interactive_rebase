@@ -163,6 +163,8 @@ ACTION_KEYS = {
 
 
 def action_allowed(action, entries, cursor):
+    if not entries:
+        return False
     if (
         action in ("reword", "edit", "squash", "fixup")
         and entries[cursor]["type"] != "commit"
@@ -336,7 +338,7 @@ def draw(stdscr, entries, cursor, salt):
     available = [
         label
         for action, label in ACTION_LABELS
-        if entries and action_allowed(action, entries, cursor)
+        if action_allowed(action, entries, cursor)
     ]
     legend = "  ".join([*available, "^Z undo", "^Y redo", "Esc quit"])
     stdscr.addnstr(h - 1, 0, legend, w - 1, curses.A_DIM)
@@ -361,11 +363,6 @@ def main(stdscr, base):
 
     while True:
         draw(stdscr, entries, cursor, salt)
-        if not entries:
-            if stdscr.getch() == 27:
-                return
-            continue
-
         key = stdscr.getch()
         if key == 27:
             return
