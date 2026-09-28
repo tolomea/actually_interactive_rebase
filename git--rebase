@@ -216,13 +216,27 @@ def do_action(stdscr, base, entries, cursor, action, auto_shell=False):
     return new_entries, new_cursor, True
 
 
+def rebase_done():
+    done = rebase_dir() / "done"
+    return done.read_text() if done.exists() else None
+
+
+def rebase_step(stdscr, arg):
+    before = rebase_done()
+    returncode, stderr = run_foreground(stdscr, ["git", "rebase", arg])
+    # stopping at the next conflict also exits non-zero, only report when stuck
+    if returncode != 0 and rebase_done() == before:
+        show_error(stdscr, stderr)
+    return returncode == 0
+
+
 def continue_or_abort(stdscr, base, action=None, auto_shell=False):
     offset = 0
     last_sha = None
 
     if auto_shell and rebase_in_progress() and not has_conflicts():
         run_foreground(stdscr, [os.environ.get("SHELL", "/bin/sh")], capture=False)
-        run_foreground(stdscr, ["git", "rebase", "--continue"])
+        rebase_step(stdscr, "--continue")
 
     while rebase_in_progress():
         diff = []
@@ -250,12 +264,12 @@ def continue_or_abort(stdscr, base, action=None, auto_shell=False):
 
         key = stdscr.getch()
         if key == 27:
-            run_foreground(stdscr, ["git", "rebase", "--abort"])
-            return False
+            if rebase_step(stdscr, "--abort"):
+                return False
         elif key == ord("c"):
-            run_foreground(stdscr, ["git", "rebase", "--continue"])
+            rebase_step(stdscr, "--continue")
         elif key == ord("s"):
-            run_foreground(stdscr, ["git", "rebase", "--skip"])
+            rebase_step(stdscr, "--skip")
         elif key == curses.KEY_UP:
             offset = max(0, offset - 1)
         elif key == curses.KEY_DOWN:
