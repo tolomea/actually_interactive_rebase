@@ -260,7 +260,7 @@ def continue_or_abort(stdscr, base, action=None, auto_shell=False):
             )
 
         visible = draw_pause(stdscr, header, diff, offset)
-        offset = max(0, min(offset, max(0, len(diff) - visible)))
+        offset = clamp_offset(offset, len(diff), visible)
 
         key = stdscr.getch()
         if key == 27:
@@ -271,9 +271,9 @@ def continue_or_abort(stdscr, base, action=None, auto_shell=False):
         elif key == ord("s"):
             rebase_step(stdscr, "--skip")
         elif key == curses.KEY_UP:
-            offset = max(0, offset - 1)
+            offset = clamp_offset(offset - 1, len(diff), visible)
         elif key == curses.KEY_DOWN:
-            offset = min(max(0, len(diff) - visible), offset + 1)
+            offset = clamp_offset(offset + 1, len(diff), visible)
         elif key == ord("!"):
             run_foreground(stdscr, [os.environ.get("SHELL", "/bin/sh")], capture=False)
     return True
@@ -289,6 +289,10 @@ def show_error(stdscr, stderr):
     stdscr.addnstr(3 + len(lines[:10]), 0, "press any key to continue", w - 1)
     stdscr.refresh()
     stdscr.getch()
+
+
+def clamp_offset(offset, length, visible):
+    return max(0, min(offset, length - visible))
 
 
 def draw_pause(stdscr, header, diff, offset):
@@ -340,10 +344,14 @@ def commit_attr(subject, is_cursor, salt):
     return (attr | curses.A_REVERSE) if is_cursor else attr
 
 
-def draw(stdscr, entries, cursor, salt):
+def draw(stdscr, entries, cursor, salt, offset):
     stdscr.clear()
     h, w = stdscr.getmaxyx()
-    for i, e in enumerate(entries):
+    visible = h - 1
+    offset = max(min(offset, cursor), cursor - visible + 1)
+    offset = clamp_offset(offset, len(entries), visible)
+    for row, e in enumerate(entries[offset : offset + visible]):
+        i = offset + row
         marker = ">" if i == cursor else " "
         if e["type"] == "update-ref":
             line = f"{marker} update-ref {e['branch']}"
@@ -352,7 +360,7 @@ def draw(stdscr, entries, cursor, salt):
             refs = f" ({e['refs']})" if e["refs"] else ""
             line = f"{marker} {e['sha'][:7]} {e['subject']}{refs}"
             attr = commit_attr(e["subject"], i == cursor, salt)
-        stdscr.addnstr(i, 0, line, w - 1, attr)
+        stdscr.addnstr(row, 0, line, w - 1, attr)
     available = [
         label
         for action, label in ACTION_LABELS
@@ -361,6 +369,7 @@ def draw(stdscr, entries, cursor, salt):
     legend = "  ".join([*available, "^Z undo", "^Y redo", "Esc quit"])
     stdscr.addnstr(h - 1, 0, legend, w - 1, curses.A_DIM)
     stdscr.refresh()
+    return offset
 
 
 def main(stdscr, base):
@@ -378,9 +387,10 @@ def main(stdscr, base):
     salt = find_salt(entries)
     history = [(snapshot(), cursor)]
     hist_idx = 0
+    offset = 0
 
     while True:
-        draw(stdscr, entries, cursor, salt)
+        offset = draw(stdscr, entries, cursor, salt, offset)
         key = stdscr.getch()
         if key == 27:
             return
