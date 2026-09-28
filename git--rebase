@@ -33,9 +33,9 @@ def is_ancestor(base):
     return git_run(["merge-base", "--is-ancestor", base, "HEAD"]).returncode == 0
 
 
-def branches_at_shas():
+def branch_shas():
     current = git_output(["rev-parse", "--abbrev-ref", "HEAD"])
-    by_sha = {}
+    shas = {}
     for line in git_output([
         "for-each-ref",
         "refs/heads",
@@ -43,8 +43,34 @@ def branches_at_shas():
     ]).splitlines():
         sha, branch = line.split(" ", 1)
         if branch != current:
-            by_sha.setdefault(sha, []).append(branch)
+            shas[branch] = sha
+    return shas
+
+
+def branches_at_shas():
+    by_sha = {}
+    for branch, sha in branch_shas().items():
+        by_sha.setdefault(sha, []).append(branch)
     return by_sha
+
+
+def snapshot():
+    return git_output(["rev-parse", "HEAD"]), branch_shas()
+
+
+def restore(state):
+    head, branches = state
+    result = git_run(["reset", "--hard", head])
+    if result.returncode != 0:
+        return result.stderr
+    current = branch_shas()
+    for branch, sha in branches.items():
+        if branch in current and current[branch] == sha:
+            continue
+        result = git_run(["update-ref", f"refs/heads/{branch}", sha])
+        if result.returncode != 0:
+            return result.stderr
+    return None
 
 
 def get_entries(base):
@@ -151,9 +177,9 @@ def action_allowed(action, entries, cursor):
     return True
 
 
-def push_history(history, hist_idx, sha, cursor):
+def push_history(history, hist_idx, state, cursor):
     history = history[: hist_idx + 1]
-    history.append((sha, cursor))
+    history.append((state, cursor))
     return history, len(history) - 1
 
 
@@ -330,7 +356,7 @@ def main(stdscr, base):
     entries = get_entries(base)
     cursor = len(entries) - 1 if entries else 0
     salt = find_salt(entries)
-    history = [(git_output(["rev-parse", "HEAD"]), cursor)]
+    history = [(snapshot(), cursor)]
     hist_idx = 0
 
     while True:
@@ -354,18 +380,18 @@ def main(stdscr, base):
                 history, hist_idx, history[hist_idx][0], cursor
             )
         elif key == 26 and hist_idx > 0:  # Ctrl-Z
-            sha, cur = history[hist_idx - 1]
-            result = git_run(["reset", "--hard", sha])
-            if result.returncode != 0:
-                show_error(stdscr, result.stderr)
+            state, cur = history[hist_idx - 1]
+            error = restore(state)
+            if error is not None:
+                show_error(stdscr, error)
             else:
                 hist_idx -= 1
                 entries, cursor = get_entries(base), cur
         elif key == 25 and hist_idx < len(history) - 1:  # Ctrl-Y
-            sha, cur = history[hist_idx + 1]
-            result = git_run(["reset", "--hard", sha])
-            if result.returncode != 0:
-                show_error(stdscr, result.stderr)
+            state, cur = history[hist_idx + 1]
+            error = restore(state)
+            if error is not None:
+                show_error(stdscr, error)
             else:
                 hist_idx += 1
                 entries, cursor = get_entries(base), cur
@@ -374,15 +400,13 @@ def main(stdscr, base):
                 stdscr, base, entries, cursor, "edit", auto_shell=True
             )
             if ok:
-                sha = git_output(["rev-parse", "HEAD"])
-                history, hist_idx = push_history(history, hist_idx, sha, cursor)
+                history, hist_idx = push_history(history, hist_idx, snapshot(), cursor)
         elif key in ACTION_KEYS and action_allowed(ACTION_KEYS[key], entries, cursor):
             entries, cursor, ok = do_action(
                 stdscr, base, entries, cursor, ACTION_KEYS[key]
             )
             if ok:
-                sha = git_output(["rev-parse", "HEAD"])
-                history, hist_idx = push_history(history, hist_idx, sha, cursor)
+                history, hist_idx = push_history(history, hist_idx, snapshot(), cursor)
 
 
 def run():
